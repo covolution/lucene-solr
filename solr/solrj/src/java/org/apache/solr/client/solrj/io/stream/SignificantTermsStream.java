@@ -62,6 +62,7 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
   protected float minDocFreq;
   protected float maxDocFreq;
   protected int minTermLength;
+  protected String backgroundQuery;
 
   protected transient SolrClientCache cache;
   protected transient boolean isCloseCache;
@@ -75,7 +76,8 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
                                  float minDocFreq,
                                  float maxDocFreq,
                                  int minTermLength,
-                                 int numTerms) throws IOException {
+                                 int numTerms,
+                                 String backgroundQuery) throws IOException {
 
     init(collectionName,
          zkHost,
@@ -84,7 +86,8 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
          minDocFreq,
          maxDocFreq,
          minTermLength,
-         numTerms);
+         numTerms,
+         backgroundQuery);
   }
 
   public SignificantTermsStream(StreamExpression expression, StreamFactory factory) throws IOException{
@@ -151,6 +154,11 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
       params.remove("maxDocFreq");
     }
 
+    String backgroundQ = params.get("backgroundQuery");
+    if (backgroundQ != null) {
+      backgroundQuery = backgroundQ;
+      params.remove("backgroundQuery");
+    }
 
     // zkHost, optional - if not provided then will look into factory list to get
     String zkHost = null;
@@ -165,7 +173,7 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
     }
 
     // We've got all the required items
-    init(collectionName, zkHost, params, fieldParam, minDocFreq, maxDocFreq, minTermLength, numTerms);
+    init(collectionName, zkHost, params, fieldParam, minDocFreq, maxDocFreq, minTermLength, numTerms, backgroundQuery);
   }
 
   @Override
@@ -188,6 +196,7 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
     expression.addParameter(new StreamExpressionNamedParameter("maxDocFreq", Float.toString(maxDocFreq)));
     expression.addParameter(new StreamExpressionNamedParameter("numTerms", String.valueOf(numTerms)));
     expression.addParameter(new StreamExpressionNamedParameter("minTermLength", String.valueOf(minTermLength)));
+    expression.addParameter(new StreamExpressionNamedParameter("backgroundQuery", backgroundQuery));
 
     // zkHost
     expression.addParameter(new StreamExpressionNamedParameter("zkHost", zkHost));
@@ -202,7 +211,9 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
                     float minDocFreq,
                     float maxDocFreq,
                     int minTermLength,
-                    int numTerms) throws IOException {
+                    int numTerms,
+                    String backgroundQuery) throws IOException {
+
     this.zkHost = zkHost;
     this.collection = collectionName;
     this.params = params;
@@ -211,6 +222,7 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
     this.maxDocFreq = maxDocFreq;
     this.numTerms = numTerms;
     this.minTermLength = minTermLength;
+    this.backgroundQuery = backgroundQuery;
   }
 
   public void setStreamContext(StreamContext context) {
@@ -237,13 +249,7 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
 
     List<Future<NamedList>> futures = new ArrayList<>();
     for (String baseUrl : baseUrls) {
-      SignificantTermsCall lc = new SignificantTermsCall(baseUrl,
-          this.params,
-          this.field,
-          this.minDocFreq,
-          this.maxDocFreq,
-          this.minTermLength,
-          this.numTerms);
+      SignificantTermsCall lc = new SignificantTermsCall(baseUrl);
 
       Future<NamedList> future = executorService.submit(lc);
       futures.add(future);
@@ -348,48 +354,32 @@ public class SignificantTermsStream extends TupleStream implements Expressible{
   protected class SignificantTermsCall implements Callable<NamedList> {
 
     private String baseUrl;
-    private String field;
-    private float minDocFreq;
-    private float maxDocFreq;
-    private int numTerms;
-    private int minTermLength;
-    private Map<String, String> paramsMap;
 
-    public SignificantTermsCall(String baseUrl,
-                                 Map<String, String> paramsMap,
-                                 String field,
-                                 float minDocFreq,
-                                 float maxDocFreq,
-                                 int minTermLength,
-                                 int numTerms) {
-
+    public SignificantTermsCall(String baseUrl) {
       this.baseUrl = baseUrl;
-      this.field = field;
-      this.minDocFreq = minDocFreq;
-      this.maxDocFreq = maxDocFreq;
-      this.paramsMap = paramsMap;
-      this.numTerms = numTerms;
-      this.minTermLength = minTermLength;
     }
 
     public NamedList<Double> call() throws Exception {
-      ModifiableSolrParams params = new ModifiableSolrParams();
+      ModifiableSolrParams solrParams = new ModifiableSolrParams();
       HttpSolrClient solrClient = cache.getHttpSolrClient(baseUrl);
 
-      params.add("distrib", "false");
-      params.add("fq","{!sigificantTerms}");
+      solrParams.add("distrib", "false");
+      solrParams.add("fq","{!sigificantTerms}");
 
-      for(String key : paramsMap.keySet()) {
-        params.add(key, paramsMap.get(key));
+      for(String key : params.keySet()) {
+        solrParams.add(key, params.get(key));
       }
 
-      params.add("minDocFreq", Float.toString(minDocFreq));
-      params.add("maxDocFreq", Float.toString(maxDocFreq));
-      params.add("minTermLength", Integer.toString(minTermLength));
-      params.add("field", field);
-      params.add("numTerms", String.valueOf(numTerms*5));
+      solrParams.add("minDocFreq", Float.toString(minDocFreq));
+      solrParams.add("maxDocFreq", Float.toString(maxDocFreq));
+      solrParams.add("minTermLength", Integer.toString(minTermLength));
+      solrParams.add("field", field);
+      solrParams.add("numTerms", String.valueOf(numTerms*5));
+      if (backgroundQuery != null) {
+        solrParams.add("backgroundQuery", backgroundQuery);
+      }
 
-      QueryRequest request= new QueryRequest(params);
+      QueryRequest request= new QueryRequest(solrParams);
       QueryResponse response = request.process(solrClient);
       NamedList res = response.getResponse();
       return res;

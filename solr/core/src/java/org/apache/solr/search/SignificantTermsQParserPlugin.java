@@ -31,12 +31,18 @@ import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.SimpleCollector;
+import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.SparseFixedBitSet;
+import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.handler.component.ResponseBuilder;
+import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.request.SolrRequestInfo;
 
 public class SignificantTermsQParserPlugin extends QParserPlugin {
 
@@ -60,7 +66,9 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
       float minDocs = Float.parseFloat(params.get("minDocFreq", "5"));
       float maxDocs = Float.parseFloat(params.get("maxDocFreq", ".3"));
       int minTermLength = Integer.parseInt(params.get("minTermLength", "4"));
-      return new SignificantTermsQuery(field, numTerms, minDocs, maxDocs, minTermLength);
+      String backgroundQ = params.get("backgroundQuery", null);
+
+      return new SignificantTermsQuery(field, numTerms, minDocs, maxDocs, minTermLength, backgroundQ);
     }
   }
 
@@ -71,19 +79,40 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
     private float maxDocs;
     private float minDocs;
     private int minTermLength;
+    private String backgroundQuery;
 
-    public SignificantTermsQuery(String field, int numTerms, float minDocs, float maxDocs, int minTermLength) {
+    public SignificantTermsQuery(String field, int numTerms, float minDocs, float maxDocs, int minTermLength, String backgroundQuery) {
       this.field = field;
       this.numTerms = numTerms;
       this.minDocs = minDocs;
       this.maxDocs = maxDocs;
       this.minTermLength = minTermLength;
-
+      this.backgroundQuery = backgroundQuery;
     }
 
     @Override
     public DelegatingCollector getAnalyticsCollector(ResponseBuilder rb, IndexSearcher searcher) {
-      return new SignifcantTermsCollector(rb, searcher, field, numTerms, minDocs, maxDocs, minTermLength);
+
+      BitSet backgroundSet =  null;
+      if (backgroundQuery != null) {
+        SolrRequestInfo info = SolrRequestInfo.getRequestInfo();
+        LocalSolrQueryRequest otherReq = new LocalSolrQueryRequest(info.getReq().getCore(), new ModifiableSolrParams());
+        try {
+          QParser parser = QParser.getParser(backgroundQuery, otherReq);
+          Query backgroundQ = parser.getQuery();
+          BitSetCollector background = new BitSetCollector(searcher.getIndexReader().maxDoc());
+          searcher.search(backgroundQ, background);
+          backgroundSet = background.getBits();
+        } catch (SyntaxError syntaxError) {
+          throw new RuntimeException(syntaxError);
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        } finally {
+          otherReq.close();
+        }
+      }
+
+      return new SignifcantTermsCollector(rb, searcher, field, numTerms, minDocs, maxDocs, minTermLength, backgroundSet);
     }
   }
 
@@ -100,8 +129,9 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
     private int count;
     private int minTermLength;
     private int highestCollected;
+    private BitSet backgroundSet;
 
-    public SignifcantTermsCollector(ResponseBuilder rb, IndexSearcher searcher, String field, int numTerms, float minDocs, float maxDocs, int minTermLength) {
+    public SignifcantTermsCollector(ResponseBuilder rb, IndexSearcher searcher, String field, int numTerms, float minDocs, float maxDocs, int minTermLength, BitSet backgroundSet) {
       this.rb = rb;
       this.searcher = searcher;
       this.field = field;
@@ -111,6 +141,7 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
       this.minDocs = minDocs;
       this.maxDocs = maxDocs;
       this.minTermLength = minTermLength;
+      this.backgroundSet = backgroundSet;
     }
 
     @Override
@@ -153,7 +184,7 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
 
       while ((term = termsEnum.next()) != null) {
         int docFreq = termsEnum.docFreq();
-        
+
         if(minDocs < 1.0) {
           if((float)docFreq/numDocs < minDocs) {
             continue;
@@ -175,6 +206,7 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
         }
 
         int tf = 0;
+        int bf = 0;
         postingsEnum = termsEnum.postings(postingsEnum);
 
         POSTINGS:
@@ -185,13 +217,24 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
             break POSTINGS;
           }
 
-          if (docs.get(docId)) {
-            ++tf;
+          if (backgroundSet != null && backgroundSet.get(docId)) {
+            ++bf;
+            if (docs.get(docId)) {
+              ++tf;
+            }
+          } else {
+            if (docs.get(docId)) {
+              ++tf;
+            }
           }
         }
 
         if(tf == 0) {
           continue;
+        }
+
+        if (backgroundSet != null ) {
+          docFreq = bf;
         }
 
         float score = (float)Math.log(tf) * (float) (Math.log(((float)(numDocs + 1)) / (docFreq + 1)) + 1.0);
@@ -223,7 +266,30 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
     }
   }
 
-  private static class TermWithScore implements Comparable<TermWithScore>{
+    private static class BitSetCollector extends SimpleCollector {
+
+      private FixedBitSet bits;
+
+      public BitSetCollector(int maxDoc) {
+        bits = new FixedBitSet(maxDoc);
+      }
+
+      @Override
+      public boolean needsScores() {
+        return false;
+      }
+
+      @Override
+      public void collect(int doc) throws IOException {
+        bits.set(doc);
+      }
+
+      public BitSet getBits() {
+        return bits;
+      }
+    }
+
+    private static class TermWithScore implements Comparable<TermWithScore>{
     public final String term;
     public final double score;
 
