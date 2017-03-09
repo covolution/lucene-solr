@@ -4848,18 +4848,20 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       tuples = getTuples(stream);
       assert (tuples.size() == 0);
 
+      significantTerms = "significantTerms(collection1, q=\"id:a*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".5\", backgroundQuery=\"id:*\")";
+      stream = factory.constructStream(significantTerms);
+      stream.setStreamContext(streamContext);
+      tuples = getTuples(stream);
+      assert(tuples.size() == 3);
+
       try {
         significantTerms = "significantTerms(collection1, q=\"id:a*\",  field=\"test_t\", limit=2, minDocFreq=\"2700\", minTermLength=2, backgroundQuery=\"INVALID:INVALID\")";
         stream = factory.constructStream(significantTerms);
+        stream.setStreamContext(streamContext);
         tuples = getTuples(stream);
       } catch(Exception e) {
         assertTrue(e.getMessage().contains("INVALID"));
       }
-      significantTerms = "significantTerms(collection1, q=\"id:a*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".5\", backgroundQuery=\"id:*\")";
-      stream = factory.constructStream(significantTerms);
-      tuples = getTuples(stream);
-      assert(tuples.size() == 3);
-
 
       //Test with shards parameter
       List<String> shardUrls = TupleStream.getShards(cluster.getZkServer().getZkAddress(), COLLECTIONORALIAS, streamContext);
