@@ -4730,7 +4730,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
     }
 
     for (int i = 0; i < 500; i++) {
-      updateRequest.add(id, "e"+i, "test_t", "m");
+      updateRequest.add(id, "e"+i, "test_t", "m b");
     }
 
     updateRequest.commit(cluster.getSolrClient(), COLLECTIONORALIAS);
@@ -4848,11 +4848,49 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       tuples = getTuples(stream);
       assert (tuples.size() == 0);
 
-      significantTerms = "significantTerms(collection1, q=\"id:a*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".5\", backgroundQuery=\"id:*\")";
+      //Background query
+      significantTerms = "significantTerms(collection1, q=\"id:c*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".7\", backgroundQuery=\"id:a* OR id:b* OR id:c*\")";
       stream = factory.constructStream(significantTerms);
       stream.setStreamContext(streamContext);
       tuples = getTuples(stream);
-      assert(tuples.size() == 3);
+      assertEquals(1,tuples.size());
+      assertTrue(tuples.get(0).get("term").equals("c"));
+      assertEquals(5900 , tuples.get(0).getLong("background").longValue());
+      assertEquals(900, tuples.get(0).getLong("foreground").longValue());
+
+
+      significantTerms = "significantTerms(collection1, q=\"id:d*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".7\", backgroundQuery=\"id:a* OR id:b* OR id:d*\")";
+      stream = factory.constructStream(significantTerms);
+      stream.setStreamContext(streamContext);
+      tuples = getTuples(stream);
+      assertEquals(1,tuples.size());
+      assertTrue(tuples.get(0).get("term").equals("d"));
+      assertEquals(5600 , tuples.get(0).getLong("background").longValue());
+      assertEquals(600, tuples.get(0).getLong("foreground").longValue());
+
+      significantTerms = "significantTerms(collection1, q=\"id:b*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".7\", backgroundQuery=\"id:a* OR id:b* OR id:c* OR id:d*\")";
+      stream = factory.constructStream(significantTerms);
+      stream.setStreamContext(streamContext);
+      tuples = getTuples(stream);
+      assertEquals(2,tuples.size());
+      assertTrue(tuples.get(0).get("term").equals("e"));
+      assertEquals(5000 , tuples.get(0).getLong("background").longValue());
+      assertEquals(5000, tuples.get(0).getLong("foreground").longValue());
+      assertTrue(tuples.get(1).get("term").equals("f"));
+      assertEquals(5000 , tuples.get(1).getLong("background").longValue());
+      assertEquals(5000, tuples.get(1).getLong("foreground").longValue());
+
+      significantTerms = "significantTerms(collection1, q=\"id:e* OR id:f* \",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".99\", backgroundQuery=\"id:a* OR id:b* OR id:e* OR id:f*\")";
+      stream = factory.constructStream(significantTerms);
+      stream.setStreamContext(streamContext);
+      tuples = getTuples(stream);
+      assertEquals(2,tuples.size());
+      assertTrue(tuples.get(0).get("term").equals("m"));
+      assertEquals(5500 , tuples.get(0).getLong("background").longValue());
+      assertEquals(500, tuples.get(0).getLong("foreground").longValue());
+      assertTrue(tuples.get(1).get("term").equals("b"));
+      assertEquals(10500 , tuples.get(1).getLong("background").longValue());
+      assertEquals(500, tuples.get(1).getLong("foreground").longValue());
 
       try {
         significantTerms = "significantTerms(collection1, q=\"id:a*\",  field=\"test_t\", limit=2, minDocFreq=\"2700\", minTermLength=2, backgroundQuery=\"INVALID:INVALID\")";
@@ -4860,7 +4898,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         stream.setStreamContext(streamContext);
         tuples = getTuples(stream);
       } catch(Exception e) {
-        assertTrue(e.getMessage().contains("INVALID"));
+        assertTrue("This is an invalid backgroundQuery",e.getMessage().contains("INVALID"));
       }
 
       //Test with shards parameter

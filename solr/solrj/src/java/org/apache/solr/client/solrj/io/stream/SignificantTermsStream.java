@@ -49,6 +49,15 @@ import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SolrjNamedThreadFactory;
 
+/**
+ *  A streaming expression to identify significant terms.
+ *
+ *  By default, the foreground query is compared against the complete index.
+ *
+ *  A backgroundQuery may be specified.  In this case,
+ *  <STRONG>the foreground set is assumed to be a subset of the background set</STRONG>.
+ *  The term is only counted if it appears in both the foreground and background sets.
+ */
 public class SignificantTermsStream extends TupleStream implements Expressible{
 
   private static final long serialVersionUID = 1;

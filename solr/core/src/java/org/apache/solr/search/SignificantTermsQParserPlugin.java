@@ -217,10 +217,12 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
             break POSTINGS;
           }
 
-          if (backgroundSet != null && backgroundSet.get(docId)) {
-            ++bf;
-            if (docs.get(docId)) {
-              ++tf;
+          if (backgroundSet != null) {
+            if (backgroundSet.get(docId)) {
+              ++bf;
+              if (docs.get(docId)) {
+                ++tf;
+              }
             }
           } else {
             if (docs.get(docId)) {
