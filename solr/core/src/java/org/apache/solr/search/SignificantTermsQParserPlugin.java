@@ -93,8 +93,14 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
     @Override
     public DelegatingCollector getAnalyticsCollector(ResponseBuilder rb, IndexSearcher searcher) {
 
-      BitSet backgroundSet =  null;
-      if (backgroundQuery != null) {
+      BitSet docs;
+      int numDocs;
+
+      if (backgroundQuery == null) {
+        //Full index
+        docs = new SparseFixedBitSet(searcher.getIndexReader().maxDoc());
+        numDocs = searcher.getIndexReader().numDocs();
+      } else {
         SolrRequestInfo info = SolrRequestInfo.getRequestInfo();
         LocalSolrQueryRequest otherReq = new LocalSolrQueryRequest(info.getReq().getCore(), new ModifiableSolrParams());
         try {
@@ -102,7 +108,11 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
           Query backgroundQ = parser.getQuery();
           BitSetCollector background = new BitSetCollector(searcher.getIndexReader().maxDoc());
           searcher.search(backgroundQ, background);
-          backgroundSet = background.getBits();
+
+          //Set background set
+          docs = background.getBits();
+          numDocs = docs.cardinality();
+
         } catch (SyntaxError syntaxError) {
           throw new RuntimeException(syntaxError);
         } catch (IOException e) {
@@ -112,7 +122,7 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
         }
       }
 
-      return new SignifcantTermsCollector(rb, searcher, field, numTerms, minDocs, maxDocs, minTermLength, backgroundSet);
+      return new SignifcantTermsCollector(rb, searcher, field, numTerms, minDocs, maxDocs, minTermLength, numDocs, docs);
     }
   }
 
@@ -122,26 +132,25 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
     private IndexSearcher searcher;
     private ResponseBuilder rb;
     private int numTerms;
-    private SparseFixedBitSet docs;
+    private BitSet docs;
     private int numDocs;
     private float minDocs;
     private float maxDocs;
     private int count;
     private int minTermLength;
     private int highestCollected;
-    private BitSet backgroundSet;
 
-    public SignifcantTermsCollector(ResponseBuilder rb, IndexSearcher searcher, String field, int numTerms, float minDocs, float maxDocs, int minTermLength, BitSet backgroundSet) {
+    public SignifcantTermsCollector(ResponseBuilder rb, IndexSearcher searcher, String field, int numTerms, float minDocs, float maxDocs, int minTermLength,
+                                    int numDocs, BitSet docs) {
       this.rb = rb;
       this.searcher = searcher;
       this.field = field;
       this.numTerms = numTerms;
-      this.docs = new SparseFixedBitSet(searcher.getIndexReader().maxDoc());
-      this.numDocs = searcher.getIndexReader().numDocs();
       this.minDocs = minDocs;
       this.maxDocs = maxDocs;
       this.minTermLength = minTermLength;
-      this.backgroundSet = backgroundSet;
+      this.numDocs = numDocs;
+      this.docs = docs;
     }
 
     @Override
@@ -206,37 +215,23 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
         }
 
         int tf = 0;
-        int bf = 0;
         postingsEnum = termsEnum.postings(postingsEnum);
 
         POSTINGS:
         while (postingsEnum.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
           int docId = postingsEnum.docID();
 
-          if(docId > highestCollected && backgroundSet == null) {
+          if(docId > highestCollected) {
             break POSTINGS;
           }
 
-          if (backgroundSet != null) {
-            if (backgroundSet.get(docId)) {
-              ++bf;
-              if (docs.get(docId)) {
-                ++tf;
-              }
-            }
-          } else {
-            if (docs.get(docId)) {
-              ++tf;
-            }
+          if (docs.get(docId)) {
+            ++tf;
           }
         }
 
         if(tf == 0) {
           continue;
-        }
-
-        if (backgroundSet != null ) {
-          docFreq = bf;
         }
 
         float score = (float)Math.log(tf) * (float) (Math.log(((float)(numDocs + 1)) / (docFreq + 1)) + 1.0);
