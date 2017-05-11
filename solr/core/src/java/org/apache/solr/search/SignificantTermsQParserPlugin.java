@@ -111,7 +111,7 @@ public class SignificantTermsQParserPlugin extends QParserPlugin {
 
           //Set background set
           docs = background.getBits();
-          numDocs = docs.cardinality();
+          numDocs = docs.length();
 
         } catch (SyntaxError syntaxError) {
           throw new RuntimeException(syntaxError);

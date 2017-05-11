@@ -6234,7 +6234,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       assert (tuples.size() == 0);
 
       //Background query
-
       significantTerms = "significantTerms(collection1, q=\"id:b*\",  field=\"test_t\", limit=3, minTermLength=1, maxDocFreq=\".95\", backgroundQuery=\"id:b* OR id:e*\")";
       stream = factory.constructStream(significantTerms);
       stream.setStreamContext(streamContext);
@@ -6249,7 +6248,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       assertEquals(5000, tuples.get(1).getLong("foreground").longValue());
 
       assertTrue(tuples.get(2).get("term").equals("b"));
-      assertEquals(5500 , tuples.get(2).getLong("background").longValue());
+      assertEquals(10500 , tuples.get(2).getLong("background").longValue());
       assertEquals(5000, tuples.get(2).getLong("foreground").longValue());
 
       try {
